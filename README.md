@@ -1,3 +1,13 @@
+# Overview
+This fork of NTKFWinfo addresses an issue with the LZMA compression in BCL1 partitions in NT96670 firmware. The problem was that recompression would shrink the partition, misaligning offsets and invalidating the partition CRC. This patch modifies the LZMA compression branch to pad the compressed data to exactly the expected size (original partition size minus the header) so that the firmware image remains fully intact. The overall firmware CRC remains unchanged.
+
+# Changes
+Modified the LZMA (Algorithm 0x0B) branch in the BCL1_compress() function.
+Added padding after compression to ensure that the packed data size equals `part_size - 16` bytes.
+Ensured that the recalculated CRC for the partition is updated correctly.
+
+This fix preserves the original firmware image layout, ensuring that devices (tested on NT96670 dash cam) can boot reliably with modified firmware.
+
 # Novatek Firmware info (NTKFWinfo)
 Python script for work with Novatek firmware files. Show full FW info, allow extract, replace, uncompress, compress partitions, fix CRC for modded partitions and whole firmware file. Useful tool for building custom firmwares.
 Use Linux environment or WSL2 (Windows Subsystem for Linux) for properly work with UBI and SPARSE partitions.
