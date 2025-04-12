@@ -978,57 +978,33 @@ def BCL1_compress(part_nr, in_offset, in2_file):
         fout.close()
         return
 
-    # LZMA compress
+   # LZMA compress
     if Algorithm == 0x0B:
-        #print("LZMA_DictSize=0x%08X" % LZMA_DictSize)
-
-        # lzma.exe e -a1 -d20 -mfbt4 -fb40 -mc36 -lc3 -lp0 -pb2 infile outfile
-        ##fast_bytes = 40
-        ##search_depth = 16 + fast_bytes//2 # depth search формула для любого из MF_BT*
-        ##my_filters = [{"id":lzma.FILTER_LZMA1, "mode":lzma.MODE_NORMAL, "dict_size":LZMA_DictSize, "mf":lzma.MF_BT4, "nice_len":fast_bytes, "depth":search_depth, "lc":3, "lp":0, "pb":2}]
-        
-        ##compress = lzma.compress(dataread, format = lzma.FORMAT_ALONE, filters = my_filters) # но пока что filters не работает с pypy3 и это все равно не дает байт в байт сжатие как lzma.exe
-        compress = lzma.compress(dataread, format = lzma.FORMAT_ALONE)
-
-        # надо дописать к сжатым данным 00... для выравнивания по 4 байтам
-        # но делаю это только если нулевая партиция (без этого NVTPACK_FW_HDR будет не выровнен)
-        addsize = 0
-        if part_id[part_nr] == 0:
-            addsize = (len(outputbuf) % 4)
-            if addsize != 0:
-                addsize = 4 - addsize
-
+        # Use LZMA compression (FORMAT_ALONE) on the uncompressed partition data.
+        compress_data = lzma.compress(dataread, format=lzma.FORMAT_ALONE)
+        # Calculate the expected packed size: partition size minus the 16-byte header.
+        expected_packed_size = part_size[part_nr] - 16
+        current_packed_size = len(compress_data)
+        padding_needed = expected_packed_size - current_packed_size
+        if padding_needed < 0:
+            print("Error: Compressed data is larger than expected!")
+            sys.exit(1)
+        out = in2_file.replace('uncomp_partitionID', 'comp_partitionID')
         fout = open(out, 'w+b')
-        fout.write(struct.pack('>I', 0x42434C31)) # write BCL1
-        fout.write(struct.pack('<H', 0x0000)) # write new CRC, unknown now - rewrite after compression
-        fout.write(struct.pack('>H', Algorithm)) # write Algorithm
-        fout.write(struct.pack('>I', len(dataread))) # write unpacked size
-        fout.write(struct.pack('>I', len(compress) + addsize)) # write packed size
-
-        fout.write(compress) # write compressed data
-
-        # добавим сколько надо 00 для выравнивания до 4 байт
-        for b in range(addsize):
-            fout.write(struct.pack('B', 0))
+        fout.write(struct.pack('>I', 0x42434C31))             # Write BCL1 marker.
+        fout.write(struct.pack('<H', 0x0000))                   # Placeholder for CRC.
+        fout.write(struct.pack('>H', Algorithm))                # Compression algorithm (LZMA).
+        fout.write(struct.pack('>I', len(dataread)))            # Uncompressed size.
+        fout.write(struct.pack('>I', expected_packed_size))     # Packed size must equal expected_packed_size.
+        fout.write(compress_data)                               # Write the compressed data.
+        if padding_needed > 0:
+            fout.write(b'\x00' * padding_needed)                # Pad with zeros to reach expected size.
         fout.close()
-
-        # исправим в LZMA заголовке данные о Unpacked size - в LZMA-библиотеке python они всегда записываются как FF FF FF FF
-        # в стандарте указано что это одно 64-битное число но во всех прошивках идет дублирование 2-х 32-битных чисел
-        ##fout = open(out, 'r+b')
-        ##fout.seek(0x15, 0)
-        ##if (LZMA_UncompSize1 == LZMA_UncompSize2):
-        ##    # если дублирование
-        ##    fout.write(struct.pack('<II', len(dataread), len(dataread)))
-        ##else:
-        ##    # если по стандарту 64 бита
-        ##    fout.write(struct.pack('<II', len(dataread)&0xFFFFFFFF, (len(dataread)>>32)&0xFFFFFFFF))
-        ##fout.close()
-
-        # пересчитываем CRC для BCL1-заголовка только после того как все остальное кроме CRC уже записали
-        newCRC = MemCheck_CalcCheckSum16Bit(out, 0, len(compress) + addsize + 16, 0x4)
+        # Recalculate and update the CRC for the BCL1 header.
+        newCRC = MemCheck_CalcCheckSum16Bit(out, 0, expected_packed_size + 16, 0x4)
         fout = open(out, 'r+b')
         fout.seek(4, 0)
-        fout.write(struct.pack('<H', newCRC)) # write new CRC value
+        fout.write(struct.pack('<H', newCRC))
         fout.close()
         return
 
